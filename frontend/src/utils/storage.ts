@@ -97,7 +97,52 @@ const initializeDemoData = () => {
 
   // Initialize bookings if not exists
   if (!localStorage.getItem(STORAGE_KEYS.BOOKINGS)) {
-    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify([]));
+    const now = Date.now();
+    const defaultBookings = [
+      {
+        id: 'b1',
+        eventId: '2',
+        userName: 'user1',
+        userEmail: 'sales@thisaitech.com',
+        phone: '1212121212',
+        guestCount: 50,
+        message: 'Need projector, stage mic, and vegetarian dinner options.',
+        userId: '1',
+        status: 'pending',
+        adminNote: 'Received. Reviewing availability and vendor slots.',
+        createdAt: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        updatedAt: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString()
+      },
+      {
+        id: 'b2',
+        eventId: '1',
+        userName: 'Anita Kumar',
+        userEmail: 'anita.k@example.com',
+        phone: '9876543210',
+        guestCount: 120,
+        message: 'Outdoor seating with floral decor and live band required.',
+        userId: '1',
+        status: 'approved',
+        adminNote: 'Approved. Venue reserved and vendor team assigned.',
+        createdAt: new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        updatedAt: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString()
+      },
+      {
+        id: 'b3',
+        eventId: '3',
+        userName: 'Ravi Sharma',
+        userEmail: 'ravi.s@example.com',
+        phone: '9988776655',
+        guestCount: 80,
+        message: 'Need traditional stage setup and separate food counters.',
+        userId: '1',
+        status: 'rejected',
+        adminNote: 'Rejected due to venue unavailability on the requested date.',
+        createdAt: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString(),
+        updatedAt: new Date(now - 9 * 24 * 60 * 60 * 1000).toISOString()
+      }
+    ];
+    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(defaultBookings));
   }
 
   // Initialize subscribers if not exists
@@ -163,6 +208,21 @@ export interface AuthResponse {
     role: 'user' | 'admin';
   };
 }
+
+export interface User {
+  id: string;
+  username: string;
+  role: 'user' | 'admin';
+}
+
+export const getUsers = async (): Promise<User[]> => {
+  const users = getItem<any[]>(STORAGE_KEYS.USERS, []);
+  return users.map((user) => ({
+    id: user.id,
+    username: user.username,
+    role: user.role
+  }));
+};
 
 export const login = async (credentials: LoginCredentials): Promise<AuthResponse> => {
   const users = getItem<any[]>(STORAGE_KEYS.USERS, []);

@@ -3,13 +3,25 @@ import cors from 'cors';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const FRONTEND_URL = process.env.FRONTEND_URL;
 
 // Middleware - Enable CORS for frontend
-app.use(cors({
-  origin: FRONTEND_URL,
-  credentials: true,
-}));
+const corsOrigin = (origin, callback) => {
+  // Allow non-browser tools (no Origin header)
+  if (!origin) return callback(null, true);
+
+  // If explicitly configured, allow exactly that origin.
+  if (FRONTEND_URL && origin === FRONTEND_URL) return callback(null, true);
+
+  // Local dev: allow localhost/127.0.0.1 on any port (Vite often runs on 5173).
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    return callback(null, true);
+  }
+
+  return callback(new Error(`Not allowed by CORS: ${origin}`));
+};
+
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json());
 
 // Authentication middleware

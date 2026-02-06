@@ -23,9 +23,12 @@ const AIAssistant: React.FC = () => {
 
   // Fetch events from API when component mounts
   useEffect(() => {
+    let isActive = true;
+
     const loadEvents = async () => {
       try {
         const fetchedEvents = await getEvents();
+        if (!isActive) return;
         // Convert to Event format
         const convertedEvents: Event[] = fetchedEvents.map(e => ({
           id: e.id,
@@ -43,7 +46,27 @@ const AIAssistant: React.FC = () => {
         console.error('Error loading events for AI assistant:', error);
       }
     };
+
     loadEvents();
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'eventic_events' || e.key === null) {
+        loadEvents();
+      }
+    };
+
+    const handleCustomStorageEvent = () => {
+      loadEvents();
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('localStorageUpdated', handleCustomStorageEvent);
+
+    return () => {
+      isActive = false;
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('localStorageUpdated', handleCustomStorageEvent);
+    };
   }, []);
 
   const scrollToBottom = () => {

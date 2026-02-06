@@ -8,6 +8,7 @@ import { AnimatedText } from '../react-bits/AnimatedText';
 import { 
   getSubscribers as apiGetSubscribers,
   deleteSubscriber as apiDeleteSubscriber,
+  getUsers as apiGetUsers,
   getBookings as apiGetBookings,
   updateBooking as apiUpdateBooking,
   getEvents as apiGetEvents,
@@ -15,6 +16,7 @@ import {
   deleteEvent as apiDeleteEvent,
   createEvent as apiCreateEvent,
   Subscriber,
+  User as UserType,
   BookingRequest,
   Event as EventType
 } from '@/utils/storage';
@@ -55,6 +57,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
   const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
   const [bookings, setBookings] = useState<BookingWithEvent[]>([]);
   const [events, setEvents] = useState<AdminEvent[]>([]);
+  const [users, setUsers] = useState<UserType[]>([]);
+  const [userSearch, setUserSearch] = useState('');
+  const [userBookingsModalId, setUserBookingsModalId] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<'bookings' | 'users' | 'events' | 'subscribers'>('bookings');
+  const [bookingPage, setBookingPage] = useState(1);
+  const [userPage, setUserPage] = useState(1);
+  const [eventPage, setEventPage] = useState(1);
+  const [subscriberPage, setSubscriberPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [detailsBooking, setDetailsBooking] = useState<BookingWithEvent | null>(null);
   const [adminNote, setAdminNote] = useState('');
@@ -91,7 +101,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
     // Listen for storage changes to keep data in sync
     const handleStorageChange = (e: StorageEvent) => {
       // Reload data when localStorage changes
-      if (e.key === 'eventic_events' || e.key === 'eventic_bookings' || e.key === 'eventic_subscribers' || e.key === null) {
+      if (
+        e.key === 'eventic_events' ||
+        e.key === 'eventic_bookings' ||
+        e.key === 'eventic_subscribers' ||
+        e.key === 'eventic_users' ||
+        e.key === null
+      ) {
         loadData();
       }
     };
@@ -111,7 +127,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
   }, [isAdmin, user]);
 
   useEffect(() => {
-    if (!detailsBooking) {
+    if (!detailsBooking && !userBookingsModalId) {
       return;
     }
     const previousOverflow = document.body.style.overflow;
@@ -119,19 +135,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [detailsBooking]);
+  }, [detailsBooking, userBookingsModalId]);
 
   const loadData = async () => {
     try {
       setLoading(true);
       // Fetch all data from API
-      const [subscribersData, bookingsData, eventsData] = await Promise.all([
+      const [subscribersData, bookingsData, eventsData, usersData] = await Promise.all([
         apiGetSubscribers().catch(() => []),
         apiGetBookings(undefined).catch(() => []), // Admin sees all bookings
-        apiGetEvents().catch(() => [])
+        apiGetEvents().catch(() => []),
+        apiGetUsers().catch(() => [])
       ]);
       
       setSubscribers(subscribersData);
+      setUsers(usersData);
       // Convert bookings to include eventName and normalize status
       const convertedBookings: BookingWithEvent[] = bookingsData.map((b: any) => {
         const event = eventsData.find((e: any) => e.id === b.eventId);
@@ -411,6 +429,100 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
     b.status === 'Pending' || b.status?.toLowerCase() === 'pending'
   ).length;
 
+  const normalizedUserSearch = userSearch.trim().toLowerCase();
+  const filteredUsers = users.filter((u) => {
+    if (!normalizedUserSearch) return true;
+    return (
+      u.username.toLowerCase().includes(normalizedUserSearch) ||
+      u.role.toLowerCase().includes(normalizedUserSearch) ||
+      u.id.toLowerCase().includes(normalizedUserSearch)
+    );
+  });
+
+  const bookingsByUserId = bookings.reduce((acc, booking) => {
+    if (!booking.userId) return acc;
+    if (!acc[booking.userId]) acc[booking.userId] = [];
+    acc[booking.userId].push(booking);
+    return acc;
+  }, {} as Record<string, BookingWithEvent[]>);
+
+  Object.values(bookingsByUserId).forEach((list) => {
+    list.sort((a, b) => {
+      const aTime = new Date(a.createdAt || a.updatedAt || a.eventDate || 0).getTime();
+      const bTime = new Date(b.createdAt || b.updatedAt || b.eventDate || 0).getTime();
+      return bTime - aTime;
+    });
+  });
+
+  const pageSize = 20;
+
+  const bookingPageSize = pageSize;
+  const bookingTotalPages = Math.max(1, Math.ceil(bookings.length / bookingPageSize));
+  const bookingPageSafe = Math.min(bookingPage, bookingTotalPages);
+  const bookingStartIndex = (bookingPageSafe - 1) * bookingPageSize;
+  const bookingEndIndex = bookingStartIndex + bookingPageSize;
+  const pagedBookings = bookings.slice(bookingStartIndex, bookingEndIndex);
+
+  useEffect(() => {
+    if (bookingPage !== bookingPageSafe) {
+      setBookingPage(bookingPageSafe);
+    }
+  }, [bookingPage, bookingPageSafe]);
+
+  const userTotalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const userPageSafe = Math.min(userPage, userTotalPages);
+  const userStartIndex = (userPageSafe - 1) * pageSize;
+  const userEndIndex = userStartIndex + pageSize;
+  const pagedUsers = filteredUsers.slice(userStartIndex, userEndIndex);
+
+  useEffect(() => {
+    if (userPage !== userPageSafe) {
+      setUserPage(userPageSafe);
+    }
+  }, [userPage, userPageSafe]);
+
+  useEffect(() => {
+    setUserPage(1);
+  }, [userSearch]);
+
+  const eventTotalPages = Math.max(1, Math.ceil(events.length / pageSize));
+  const eventPageSafe = Math.min(eventPage, eventTotalPages);
+  const eventStartIndex = (eventPageSafe - 1) * pageSize;
+  const eventEndIndex = eventStartIndex + pageSize;
+  const pagedEvents = events.slice(eventStartIndex, eventEndIndex);
+
+  useEffect(() => {
+    if (eventPage !== eventPageSafe) {
+      setEventPage(eventPageSafe);
+    }
+  }, [eventPage, eventPageSafe]);
+
+  const subscriberTotalPages = Math.max(1, Math.ceil(subscribers.length / pageSize));
+  const subscriberPageSafe = Math.min(subscriberPage, subscriberTotalPages);
+  const subscriberStartIndex = (subscriberPageSafe - 1) * pageSize;
+  const subscriberEndIndex = subscriberStartIndex + pageSize;
+  const pagedSubscribers = subscribers.slice(subscriberStartIndex, subscriberEndIndex);
+
+  useEffect(() => {
+    if (subscriberPage !== subscriberPageSafe) {
+      setSubscriberPage(subscriberPageSafe);
+    }
+  }, [subscriberPage, subscriberPageSafe]);
+
+  const selectedUser = userBookingsModalId
+    ? users.find((u) => u.id === userBookingsModalId)
+    : null;
+  const selectedUserBookings = selectedUser
+    ? (bookingsByUserId[selectedUser.id] || [])
+    : [];
+
+  const sectionTabs = [
+    { id: 'bookings', label: 'Booking Management', count: bookings.length },
+    { id: 'users', label: 'User Management', count: filteredUsers.length },
+    { id: 'events', label: 'Event Management', count: events.length },
+    { id: 'subscribers', label: 'Subscription Management', count: subscribers.length }
+  ] as const;
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -420,7 +532,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-6 md:py-12">
+    <div className="min-h-screen bg-gray-50 py-6 md:py-8">
       <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8">
         {/* Header */}
         {onBack && (
@@ -435,7 +547,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
           </button>
         )}
 
-        <div className="bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-700 rounded-xl md:rounded-2xl shadow-xl border border-purple-500/20 p-4 md:p-8 mb-6 md:mb-8">
+        <div className="bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-700 rounded-xl md:rounded-2xl shadow-xl border border-purple-500/20 p-4 md:p-8 mb-4 md:mb-6">
           <FadeIn delay={0.2} duration={0.8}>
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4">
               <div className="flex-1">
@@ -460,7 +572,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
         </div>
 
         {/* Overview Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 mb-8 md:mb-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 mb-4 md:mb-6">
           <FadeIn delay={0.3} duration={0.6}>
             <div className="bg-white/80 backdrop-blur-sm rounded-lg md:rounded-xl p-4 md:p-6 border border-gray-200 shadow-lg">
               <div className="text-2xl md:text-3xl font-bold text-purple-600 mb-1 md:mb-2">{events.length}</div>
@@ -487,63 +599,257 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
           </FadeIn>
         </div>
 
+        {/* Section Tabs */}
+        <div className="mb-3 md:mb-4">
+          <div className="bg-white/80 backdrop-blur-sm rounded-xl border border-gray-200 shadow-md p-2 md:p-3">
+            <div className="flex flex-wrap gap-2">
+              {sectionTabs.map((tab) => {
+                const isActive = activeSection === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveSection(tab.id)}
+                    className={`flex items-center gap-2 px-3 md:px-4 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all border ${
+                      isActive
+                        ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span className={`px-2 py-0.5 text-[10px] md:text-xs rounded-full ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
         {/* Booking Management */}
-        <div className="mb-8 md:mb-12">
-          <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4 md:mb-6">Booking Management</h2>
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div className="hidden md:block">
-              <table className="w-full table-fixed">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[18%]">Event</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[20%]">Contact</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[8%]">Guests</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[12%]">Event Date</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[14%]">Location</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[10%]">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[10%]">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
+        {activeSection === 'bookings' && (
+          <div className="mb-6 md:mb-8">
+            <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-3 md:mb-4">Booking Management</h2>
+            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="hidden md:block">
+                <table className="w-full table-fixed">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[18%]">Event</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[20%]">Contact</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[8%]">Guests</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[12%]">Event Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[14%]">Location</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[10%]">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[10%]">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
                   {bookings.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-4 py-6 text-center text-gray-500">No bookings found</td>
                     </tr>
                   ) : (
-                    bookings.map((booking) => {
+                    pagedBookings.map((booking) => {
                       const eventName = booking.eventName || 'Unknown Event';
                       return (
-                        <tr key={booking.id} className="hover:bg-gray-50 align-top">
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900 break-words">{eventName}</td>
-                          <td className="px-4 py-3 text-sm text-gray-700 break-words">
-                            <div className="font-medium text-gray-900">{booking.userName || 'N/A'}</div>
-                            <div className="text-xs text-gray-600 break-all">{booking.userEmail || 'N/A'}</div>
-                            <div className="text-xs text-gray-600">{booking.phone || 'N/A'}</div>
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-700">{booking.guestCount ?? booking.tickets ?? 'N/A'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-700">{booking.eventDate ? new Date(booking.eventDate).toLocaleDateString() : 'N/A'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-700 break-words">{booking.eventLocation || 'N/A'}</td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                          <tr key={booking.id} className="hover:bg-gray-50 align-top">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900 break-words">{eventName}</td>
+                            <td className="px-4 py-3 text-sm text-gray-700 break-words">
+                              <div className="font-medium text-gray-900">{booking.userName || 'N/A'}</div>
+                              <div className="text-xs text-gray-600 break-all">{booking.userEmail || 'N/A'}</div>
+                              <div className="text-xs text-gray-600">{booking.phone || 'N/A'}</div>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-700">{booking.guestCount ?? booking.tickets ?? 'N/A'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-700">{booking.eventDate ? new Date(booking.eventDate).toLocaleDateString() : 'N/A'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-700 break-words">{booking.eventLocation || 'N/A'}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                booking.status === 'Approved' || booking.status?.toLowerCase() === 'approved' ? 'bg-green-100 text-green-800' :
+                                booking.status === 'Rejected' || booking.status?.toLowerCase() === 'rejected' ? 'bg-red-100 text-red-800' :
+                                'bg-yellow-100 text-yellow-800'
+                              }`}>
+                                {booking.status ? (booking.status.charAt(0).toUpperCase() + booking.status.slice(1).toLowerCase()) : 'Pending'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <button
+                                onClick={() => {
+                                  setDetailsBooking(booking);
+                                  setAdminNote(booking.adminNote || '');
+                                }}
+                                className="px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
+                              >
+                                Details
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            <div className="md:hidden">
+              {bookings.length === 0 ? (
+                <div className="px-4 py-6 text-center text-sm text-gray-500">No bookings found</div>
+              ) : (
+                <div className="divide-y divide-gray-200">
+                  {pagedBookings.map((booking) => {
+                      const eventName = (booking as any).eventName || 'Unknown Event';
+                      return (
+                        <div key={booking.id} className="p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-gray-900 truncate">{eventName}</div>
+                              <div className="text-xs text-gray-500 mt-1">{booking.userName || 'N/A'}</div>
+                              <div className="text-xs text-gray-500">{booking.userEmail || 'N/A'}</div>
+                              <div className="text-xs text-gray-500">Phone: {booking.phone || 'N/A'}</div>
+                              <div className="text-xs text-gray-500">Guests: {booking.guestCount ?? booking.tickets ?? 'N/A'}</div>
+                              <div className="text-xs text-gray-500">
+                                Event Date: {booking.eventDate ? new Date(booking.eventDate).toLocaleDateString() : 'N/A'}
+                              </div>
+                              <div className="text-xs text-gray-500">Location: {booking.eventLocation || 'N/A'}</div>
+                            </div>
+                            <span className={`px-2 py-1 text-xs font-semibold rounded-full whitespace-nowrap ${
                               booking.status === 'Approved' || booking.status?.toLowerCase() === 'approved' ? 'bg-green-100 text-green-800' :
                               booking.status === 'Rejected' || booking.status?.toLowerCase() === 'rejected' ? 'bg-red-100 text-red-800' :
                               'bg-yellow-100 text-yellow-800'
                             }`}>
                               {booking.status ? (booking.status.charAt(0).toUpperCase() + booking.status.slice(1).toLowerCase()) : 'Pending'}
                             </span>
-                          </td>
-                          <td className="px-4 py-3">
+                          </div>
+                          <div className="mt-3">
                             <button
                               onClick={() => {
                                 setDetailsBooking(booking);
                                 setAdminNote(booking.adminNote || '');
                               }}
-                              className="px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
+                              className="w-full sm:w-auto px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
                             >
                               Details
                             </button>
-                          </td>
-                        </tr>
+                          </div>
+                        </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-gray-600">
+            <div>
+              Showing {pagedBookings.length} / {bookingPageSize} · Total {bookings.length}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setBookingPage((p) => Math.max(1, p - 1))}
+                disabled={bookingPageSafe === 1}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Prev
+              </button>
+              <span className="text-xs text-gray-500">
+                Page {bookingPageSafe} / {bookingTotalPages}
+              </span>
+              <button
+                onClick={() => setBookingPage((p) => Math.min(bookingTotalPages, p + 1))}
+                disabled={bookingPageSafe === bookingTotalPages}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+        )}
+
+        {/* User Management */}
+        {activeSection === 'users' && (
+          <div className="mb-6 md:mb-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3 md:mb-4">
+            <div>
+              <h2 className="text-xl md:text-2xl font-bold text-gray-900 flex items-center gap-2">
+                User Management
+                <span className="inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full bg-gray-100 text-gray-700">
+                  {filteredUsers.length}
+                </span>
+              </h2>
+              <p className="text-gray-600 text-xs md:text-sm mt-1">View users and their booking history</p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              <div className="relative w-full sm:w-72">
+                <input
+                  type="text"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  placeholder="Search by username, role, or id"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                />
+              </div>
+              {userSearch && (
+                <button
+                  onClick={() => setUserSearch('')}
+                  className="w-full sm:w-auto px-3 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-xs md:text-sm font-medium"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="hidden md:block">
+              <table className="w-full table-fixed">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[26%]">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[14%]">Role</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[14%]">Bookings</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[22%]">Last Booking</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase w-[14%]">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-6 text-center text-gray-500">No users found</td>
+                    </tr>
+                  ) : (
+                    pagedUsers.map((u) => {
+                      const userBookings = bookingsByUserId[u.id] || [];
+                      const lastBooking = userBookings[0];
+                      const lastBookingDateValue = lastBooking?.createdAt || lastBooking?.updatedAt || lastBooking?.eventDate;
+                      const lastBookingDate = lastBookingDateValue ? new Date(lastBookingDateValue).toLocaleDateString() : 'N/A';
+                      return (
+                        <React.Fragment key={u.id}>
+                          <tr className="hover:bg-gray-50 align-top">
+                            <td className="px-4 py-3 text-sm text-gray-900">
+                              <div className="font-semibold">{u.username}</div>
+                              <div className="text-xs text-gray-500">ID: {u.id}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                u.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'
+                              }`}>
+                                {u.role}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-700">{userBookings.length}</td>
+                            <td className="px-4 py-3 text-sm text-gray-700">
+                              {lastBookingDate}
+                            </td>
+                            <td className="px-4 py-3">
+                              <button
+                                onClick={() => setUserBookingsModalId(u.id)}
+                                className="px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
+                              >
+                                View
+                              </button>
+                            </td>
+                          </tr>
+                        </React.Fragment>
                       );
                     })
                   )}
@@ -551,43 +857,32 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
               </table>
             </div>
             <div className="md:hidden">
-              {bookings.length === 0 ? (
-                <div className="px-4 py-6 text-center text-sm text-gray-500">No bookings found</div>
+              {filteredUsers.length === 0 ? (
+                <div className="px-4 py-6 text-center text-sm text-gray-500">No users found</div>
               ) : (
                 <div className="divide-y divide-gray-200">
-                  {bookings.map((booking) => {
-                    const eventName = (booking as any).eventName || 'Unknown Event';
+                  {pagedUsers.map((u) => {
+                    const userBookings = bookingsByUserId[u.id] || [];
+                    const lastBooking = userBookings[0];
+                    const lastBookingDateValue = lastBooking?.createdAt || lastBooking?.updatedAt || lastBooking?.eventDate;
+                    const lastBookingDate = lastBookingDateValue ? new Date(lastBookingDateValue).toLocaleDateString() : 'N/A';
                     return (
-                      <div key={booking.id} className="p-4">
+                      <div key={u.id} className="p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="text-sm font-semibold text-gray-900 truncate">{eventName}</div>
-                            <div className="text-xs text-gray-500 mt-1">{booking.userName || 'N/A'}</div>
-                            <div className="text-xs text-gray-500">{booking.userEmail || 'N/A'}</div>
-                            <div className="text-xs text-gray-500">Phone: {booking.phone || 'N/A'}</div>
-                            <div className="text-xs text-gray-500">Guests: {booking.guestCount ?? booking.tickets ?? 'N/A'}</div>
+                            <div className="text-sm font-semibold text-gray-900 truncate">{u.username}</div>
+                            <div className="text-xs text-gray-500">ID: {u.id}</div>
+                            <div className="text-xs text-gray-500 mt-1">Role: {u.role}</div>
+                            <div className="text-xs text-gray-500">Bookings: {userBookings.length}</div>
                             <div className="text-xs text-gray-500">
-                              Event Date: {booking.eventDate ? new Date(booking.eventDate).toLocaleDateString() : 'N/A'}
+                              Last Booking: {lastBookingDate}
                             </div>
-                            <div className="text-xs text-gray-500">Location: {booking.eventLocation || 'N/A'}</div>
                           </div>
-                          <span className={`px-2 py-1 text-xs font-semibold rounded-full whitespace-nowrap ${
-                            booking.status === 'Approved' || booking.status?.toLowerCase() === 'approved' ? 'bg-green-100 text-green-800' :
-                            booking.status === 'Rejected' || booking.status?.toLowerCase() === 'rejected' ? 'bg-red-100 text-red-800' :
-                            'bg-yellow-100 text-yellow-800'
-                          }`}>
-                            {booking.status ? (booking.status.charAt(0).toUpperCase() + booking.status.slice(1).toLowerCase()) : 'Pending'}
-                          </span>
-                        </div>
-                        <div className="mt-3">
                           <button
-                            onClick={() => {
-                              setDetailsBooking(booking);
-                              setAdminNote(booking.adminNote || '');
-                            }}
-                            className="w-full sm:w-auto px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
+                            onClick={() => setUserBookingsModalId(u.id)}
+                            className="px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 transition-colors"
                           >
-                            Details
+                            View
                           </button>
                         </div>
                       </div>
@@ -597,11 +892,37 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
               )}
             </div>
           </div>
+          <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-gray-600">
+            <div>
+              Showing {pagedUsers.length} / {pageSize} · Total {filteredUsers.length}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setUserPage((p) => Math.max(1, p - 1))}
+                disabled={userPageSafe === 1}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Prev
+              </button>
+              <span className="text-xs text-gray-500">
+                Page {userPageSafe} / {userTotalPages}
+              </span>
+              <button
+                onClick={() => setUserPage((p) => Math.min(userTotalPages, p + 1))}
+                disabled={userPageSafe === userTotalPages}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
+        )}
 
         {/* Event Management */}
-        <div className="mb-8 md:mb-12">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4 md:mb-6">
+        {activeSection === 'events' && (
+          <div className="mb-6 md:mb-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3 md:mb-4">
             <h2 className="text-xl md:text-2xl font-bold text-gray-900">Event Management</h2>
             {!editingEvent && (
               <button
@@ -786,7 +1107,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
                         <td colSpan={6} className="px-4 py-6 text-center text-gray-500">No events found</td>
                       </tr>
                     ) : (
-                      events.map((event) => (
+                      pagedEvents.map((event) => (
                         <tr key={event.id} className="hover:bg-gray-50">
                           <td className="px-4 py-3">
                             <div className="flex items-center space-x-3 min-w-[200px]">
@@ -848,7 +1169,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
                 <div className="px-4 py-6 text-center text-sm text-gray-500">No events found</div>
               ) : (
                 <div className="divide-y divide-gray-200">
-                  {events.map((event) => (
+                  {pagedEvents.map((event) => (
                     <div key={event.id} className="p-4">
                       <div className="flex items-center gap-3">
                         {event.imageUrl && (
@@ -909,14 +1230,40 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
                     </div>
                   ))}
                 </div>
-              )}
+                )}
+            </div>
+          </div>
+          <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-gray-600">
+            <div>
+              Showing {pagedEvents.length} / {pageSize} · Total {events.length}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setEventPage((p) => Math.max(1, p - 1))}
+                disabled={eventPageSafe === 1}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Prev
+              </button>
+              <span className="text-xs text-gray-500">
+                Page {eventPageSafe} / {eventTotalPages}
+              </span>
+              <button
+                onClick={() => setEventPage((p) => Math.min(eventTotalPages, p + 1))}
+                disabled={eventPageSafe === eventTotalPages}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
             </div>
           </div>
         </div>
+        )}
 
         {/* Subscriber Management */}
-        <div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4 md:mb-6">
+        {activeSection === 'subscribers' && (
+          <div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3 md:mb-4">
             <div>
               <h2 className="text-xl md:text-2xl font-bold text-gray-900">Subscription Management</h2>
               <p className="text-gray-600 text-xs md:text-sm mt-1">Manage newsletter subscribers</p>
@@ -959,7 +1306,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
                         <td colSpan={5} className="px-4 py-6 text-center text-gray-500">No subscribers found</td>
                       </tr>
                     ) : (
-                      subscribers.map((subscriber, index) => (
+                      pagedSubscribers.map((subscriber, index) => (
                         <tr key={index} className="hover:bg-gray-50">
                           <td className="px-4 py-3 text-sm text-gray-900">{subscriber.email || 'N/A'}</td>
                           <td className="px-4 py-3 text-sm text-gray-600">{subscriber.phone || 'N/A'}</td>
@@ -995,7 +1342,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
                 <div className="px-4 py-6 text-center text-sm text-gray-500">No subscribers found</div>
               ) : (
                 <div className="divide-y divide-gray-200">
-                  {subscribers.map((subscriber, index) => (
+                  {pagedSubscribers.map((subscriber, index) => (
                     <div key={index} className="p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -1027,7 +1374,108 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onBack, onLogout }) => {
               )}
             </div>
           </div>
+          <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-gray-600">
+            <div>
+              Showing {pagedSubscribers.length} / {pageSize} · Total {subscribers.length}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSubscriberPage((p) => Math.max(1, p - 1))}
+                disabled={subscriberPageSafe === 1}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Prev
+              </button>
+              <span className="text-xs text-gray-500">
+                Page {subscriberPageSafe} / {subscriberTotalPages}
+              </span>
+              <button
+                onClick={() => setSubscriberPage((p) => Math.min(subscriberTotalPages, p + 1))}
+                disabled={subscriberPageSafe === subscriberTotalPages}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
+        )}
+
+        {selectedUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
+            <div
+              className="absolute inset-0 bg-black/40"
+              onClick={() => setUserBookingsModalId(null)}
+            />
+            <div className="relative w-full max-w-[720px] bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden">
+              <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] text-gray-500 uppercase tracking-wide">User Bookings</div>
+                  <h3 className="text-sm sm:text-base font-semibold text-gray-900">{selectedUser.username}</h3>
+                  <div className="text-xs text-gray-500">
+                    ID: {selectedUser.id} | Role: {selectedUser.role} | Bookings: {selectedUserBookings.length}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setUserBookingsModalId(null)}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
+                  aria-label="Close user bookings"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="p-3">
+                {selectedUserBookings.length === 0 ? (
+                  <div className="text-sm text-gray-500">No bookings for this user.</div>
+                ) : (
+                  <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                    {selectedUserBookings.map((booking) => {
+                      const bookingDateValue = booking.eventDate || booking.createdAt || booking.updatedAt;
+                      const bookingDate = bookingDateValue ? new Date(bookingDateValue).toLocaleDateString() : 'N/A';
+                      return (
+                        <div key={booking.id} className="flex items-start justify-between gap-3 border border-gray-200 rounded-lg px-3 py-2 bg-white">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-gray-900 truncate">{booking.eventName || 'Unknown Event'}</div>
+                            <div className="text-xs text-gray-500">
+                              {bookingDate} | Guests: {booking.guestCount ?? booking.tickets ?? 'N/A'} | {booking.eventLocation || 'N/A'}
+                            </div>
+                            {booking.message && (
+                              <div className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                Message: {booking.message}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                              booking.status === 'Approved' || booking.status?.toLowerCase() === 'approved' ? 'bg-green-100 text-green-800' :
+                              booking.status === 'Rejected' || booking.status?.toLowerCase() === 'rejected' ? 'bg-red-100 text-red-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {booking.status ? (booking.status.charAt(0).toUpperCase() + booking.status.slice(1).toLowerCase()) : 'Pending'}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setDetailsBooking(booking);
+                                setAdminNote(booking.adminNote || '');
+                                setUserBookingsModalId(null);
+                              }}
+                              className="px-3 py-1.5 bg-purple-600 text-white text-xs rounded-lg hover:bg-purple-700 transition-colors"
+                            >
+                              Details
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {detailsBooking && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-3">

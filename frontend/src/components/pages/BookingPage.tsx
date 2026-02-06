@@ -33,10 +33,13 @@ const BookingPage: React.FC<BookingPageProps> = ({ searchParams = {}, onBookingS
   const [eventsLoading, setEventsLoading] = useState(true);
 
   useEffect(() => {
+    let isActive = true;
+
     const loadEvents = async () => {
       try {
         setEventsLoading(true);
         const fetchedEvents = await getEvents();
+        if (!isActive) return;
         const convertedEvents: Event[] = fetchedEvents.map(e => ({
           id: e.id,
           title: e.title,
@@ -49,7 +52,7 @@ const BookingPage: React.FC<BookingPageProps> = ({ searchParams = {}, onBookingS
           organizer: e.organizer
         }));
         setEvents(convertedEvents);
-        
+
         // Auto-select event if search params match
         if (searchParams.eventType || searchParams.location || searchParams.date) {
           const matchedEvent = convertedEvents.find(e => 
@@ -64,10 +67,32 @@ const BookingPage: React.FC<BookingPageProps> = ({ searchParams = {}, onBookingS
       } catch (error) {
         console.error('Error loading events:', error);
       } finally {
-        setEventsLoading(false);
+        if (isActive) {
+          setEventsLoading(false);
+        }
       }
     };
+
     loadEvents();
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'eventic_events' || e.key === null) {
+        loadEvents();
+      }
+    };
+
+    const handleCustomStorageEvent = () => {
+      loadEvents();
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('localStorageUpdated', handleCustomStorageEvent);
+
+    return () => {
+      isActive = false;
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('localStorageUpdated', handleCustomStorageEvent);
+    };
   }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
