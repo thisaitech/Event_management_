@@ -1,0 +1,20 @@
+{
+  "name": "eventic-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Backend API server for Eventic platform",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.22.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21"
+  }
+}
+

@@ -1,0 +1,7 @@
+{
+  "name": "Eventic - Modern Event Discovery",
+  "description": "A premium event booking platform featuring a clean UI, powerful search, and an AI-powered event concierge for personalized recommendations.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
